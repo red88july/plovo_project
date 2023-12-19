@@ -1,38 +1,112 @@
 import Toolbar from './components/Toolbar/Toolbar';
-import DishForm from './components/DishForm/DishForm';
-import Dishes from './components/Dishes/Dishes';
-import Cart from './components/Cart/Cart';
-import {useState} from 'react';
-import {Dish} from './type';
+import {useCallback, useEffect, useState} from 'react';
+import {CartDish, Dish, DishesList} from './types';
+import Home from './containers/Home/Home';
+import NewDish from './containers/NewDish/NewDish';
+import {Route, Routes, useLocation} from 'react-router-dom';
+import Checkout from './containers/Checkout/Checkout';
+import Order from './containers/Order/Order';
+import axiosApi from './axiosApi';
+import EditDish from './containers/EditDish/EditDish';
 
 function App() {
-  const [dishes, setDishes] = useState<Dish []>([
-    {id: '1', name: 'Plov', price: 250, description: 'Very tasty pilaf', image: 'https://img1.russianfood.com/dycontent/images_upl/538/big_537904.jpg'},
-    {id: '2', name: 'Another plov', price: 350, description: 'Very tasty pilaf', image: 'https://s1.eda.ru/StaticContent/Photos/120131082439/160124115932/p_O.jpg'},
-  ]);
+  const location = useLocation();
 
-  const addDish = (dish: Dish) => {
-    setDishes((prev) => [...prev, dish]);
+  const [dishes, setDishes] = useState<Dish[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [cartDishes, setCartDishes] = useState<CartDish[]>([]);
+
+  const fetchDishes = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const dishesResponse = await axiosApi.get<DishesList | null>('dishes.json');
+      const dishes = dishesResponse.data;
+
+      if (!dishes) {
+        return;
+      }
+
+      const newDishes = Object.keys(dishes).map((id) => {
+        const dish = dishes[id];
+        return {
+          ...dish,
+          id,
+        };
+      });
+
+      setDishes(newDishes);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (location.pathname === '/') {
+      void fetchDishes();
+    }
+  }, [location.pathname, fetchDishes]);
+
+  const deleteDish = async (id: string) => {
+    if (window.confirm('Do you really want to delete?')) {
+      await axiosApi.delete('dishes/' + id + '.json');
+
+      setCartDishes((prevState) => {
+        return prevState.filter(cartDish => {
+          return cartDish.dish.id !== id;
+        });
+      });
+
+      await fetchDishes();
+    }
   };
 
+  const addDishToCart = (dish: Dish) => {
+    setCartDishes((prevState) => {
+      const existingIndex = prevState.findIndex((cartDish) => {
+        return cartDish.dish === dish;
+      });
+
+      if (existingIndex === -1) {
+        const newCartDish: CartDish = {dish, amount: 1};
+        return [...prevState, newCartDish];
+      } else {
+        const itemsCopy = [...prevState];
+        const itemCopy = {...itemsCopy[existingIndex]};
+        itemCopy.amount++;
+        itemsCopy[existingIndex] = itemCopy;
+        return itemsCopy;
+      }
+    });
+  };
 
   return (
     <>
-    <header>
-      <Toolbar />
-    </header>
+      <header>
+        <Toolbar/>
+      </header>
       <main className="container-fluid">
-        <div className="row mt-2">
-          <div className="col-4">
-            <DishForm onSubmit={addDish}/>
-          </div>
-          <div className="col-4">
-            <Dishes dishes={dishes}/>
-          </div>
-          <div className="col-4">
-            <Cart />
-          </div>
-        </div>
+        <Routes>
+          <Route path="/" element={(
+            <Home
+              dishesLoading={loading}
+              dishes={dishes}
+              addToCart={addDishToCart}
+              cartDishes={cartDishes}
+              deleteDish={deleteDish}
+            />
+          )} />
+          <Route path="/new-dish" element={<NewDish />} />
+          <Route path="/edit-dish/:id" element={<EditDish/>}/>
+          <Route path="/checkout" element={(
+            <Checkout cartDishes={cartDishes}/>
+          )} >
+            <Route path="continue" element={(
+              <Order cartDishes={cartDishes}/>
+            )}/>
+          </Route>
+          <Route path="*" element={(<h1>Not Found!</h1>)}/>
+        </Routes>
       </main>
     </>
   );
